@@ -24,11 +24,11 @@ export default function RoadPage({ params }: { params: { code: string } }) {
   const [error, setError] = useState<string>('');
 
   const queryUrl = useMemo(() => {
-    const url = new URL('/api/events', window.location.origin);
-    url.searchParams.set('sort', 'delay');
-    if (type) url.searchParams.set('type', type);
-    if (road) url.searchParams.set('road', road);
-    return url.toString();
+    const params = new URLSearchParams();
+    params.set('sort', 'delay');
+    if (type) params.set('type', type);
+    if (road) params.set('road', road);
+    return `/api/events?${params.toString()}`;
   }, [type, road]);
 
   useEffect(() => {

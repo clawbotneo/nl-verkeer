@@ -89,18 +89,18 @@ export default function Home() {
   const derivedRoad = useMemo(() => parseRoadInput(roadInput), [roadInput]);
 
   const queryUrl = useMemo(() => {
-    const url = new URL('/api/events', window.location.origin);
-    url.searchParams.set('sort', sort);
+    const params = new URLSearchParams();
+    params.set('sort', sort);
 
     const effectiveType = derivedRoad.type ?? (roadType === 'ALL' ? undefined : roadType);
     const effectiveRoad = derivedRoad.road;
 
-    if (effectiveType) url.searchParams.set('type', effectiveType);
-    if (Number.isFinite(effectiveRoad)) url.searchParams.set('road', String(effectiveRoad));
+    if (effectiveType) params.set('type', effectiveType);
+    if (Number.isFinite(effectiveRoad)) params.set('road', String(effectiveRoad));
 
-    if (category !== 'all') url.searchParams.set('category', category);
+    if (category !== 'all') params.set('category', category);
 
-    return url.toString();
+    return `/api/events?${params.toString()}`;
   }, [sort, derivedRoad.type, derivedRoad.road, roadType, category]);
 
   async function load() {
