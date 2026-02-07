@@ -1,6 +1,7 @@
 # nl-verkeer
 
 Repo: https://github.com/clawbotneo/nl-verkeer
+Live: https://nlverkeer-f8erh2fkghcxh2ad.westeurope-01.azurewebsites.net/
 
 Small site that lists **current Dutch traffic jams and accidents** with filters for **A-roads** and **N-roads**, plus sorting by **delay** or **length**.
 

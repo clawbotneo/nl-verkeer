@@ -256,9 +256,14 @@ export default function Home() {
         </div>
       </section>
 
-      <footer className="mt-10 text-xs text-gray-500">
+      <footer className="mt-10 text-xs text-gray-500 space-y-1">
         <div>
           Data via <a className="underline" href="https://opendata.ndw.nu/" target="_blank" rel="noreferrer">opendata.ndw.nu</a>.
+        </div>
+        <div>
+          Live: <a className="underline" href="https://nlverkeer-f8erh2fkghcxh2ad.westeurope-01.azurewebsites.net/" target="_blank" rel="noreferrer">
+            nlverkeer-f8erh2fkghcxh2ad.westeurope-01.azurewebsites.net
+          </a>
         </div>
       </footer>
     </main>
