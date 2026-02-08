@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchNdwEvents } from '@/lib/ndw';
 import { fetchAnwbEvents } from '@/lib/anwb';
+import { fetchRwsExternalInfoForRoad } from '@/lib/x';
 import type { EventsQuery, TrafficEvent } from '@/lib/types';
 
 type Cache = {
@@ -96,7 +97,29 @@ async function getEventsFresh(): Promise<{ cache: Cache; stale: boolean; warning
   }
 
   try {
-    const events = await load();
+    let events = await load();
+
+    // Optional enrichment: add latest matching @RWSverkeersinfo post per roadCode.
+    if (process.env.X_BEARER_TOKEN) {
+      const roadCodes = Array.from(new Set(events.map((e) => e.roadCode)));
+      const posts = await Promise.all(
+        roadCodes.map(async (rc) => ({ rc, post: await fetchRwsExternalInfoForRoad(rc) }))
+      );
+      const byRoad = new Map(posts.filter((p) => p.post).map((p) => [p.rc, p.post!]));
+      if (byRoad.size) {
+        events = events.map((e) => {
+          const p = byRoad.get(e.roadCode);
+          if (!p) return e;
+          return {
+            ...e,
+            externalInfoText: p.text,
+            externalInfoUrl: p.url,
+            externalInfoUpdated: p.createdAt ?? new Date(now).toISOString(),
+          };
+        });
+      }
+    }
+
     const next: Cache = { fetchedAt: now, events };
     globalThis.__nlVerkeerCache = next;
     return { cache: next, stale: false };
