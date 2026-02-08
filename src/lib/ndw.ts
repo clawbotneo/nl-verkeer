@@ -431,6 +431,8 @@ async function fetchNdwMeasuredJamsFromTravelTime(): Promise<TrafficEvent[]> {
   const candidates: JamCandidate[] = [];
   const wantedIds = new Set<string>();
 
+  const MAX_JAMS = 200; // cap work + UI noise
+
   for (const sm of siteMeasurements) {
     const siteId = sm?.measurementSiteReference?.['@_id'];
     if (typeof siteId !== 'string') continue;
@@ -453,14 +455,18 @@ async function fetchNdwMeasuredJamsFromTravelTime(): Promise<TrafficEvent[]> {
     if (delayMin < 5) continue;
 
     candidates.push({ siteId, curDur, refDur, delayMin });
-    wantedIds.add(siteId);
   }
+
+  // Only resolve + return the top N jams by delay (keeps measurement_current lookup fast).
+  candidates.sort((a, b) => b.delayMin - a.delayMin);
+  const top = candidates.slice(0, MAX_JAMS);
+  for (const c of top) wantedIds.add(c.siteId);
 
   const siteInfo = await getMeasurementSitesFor(wantedIds);
 
   const out: TrafficEvent[] = [];
 
-  for (const c of candidates) {
+  for (const c of top) {
     const info = siteInfo.get(c.siteId);
     const roadCode = info?.roadCode;
     if (!roadCode) continue;
