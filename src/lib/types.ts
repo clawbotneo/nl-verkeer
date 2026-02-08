@@ -14,6 +14,7 @@ export interface TrafficEvent {
   delayMin?: number;
   category: EventCategory;
   eventTypeRaw?: string;
+  reasonText?: string;
   lastUpdated: string; // ISO
   source: 'NDW' | 'ANWB';
   sourceUrl: string;

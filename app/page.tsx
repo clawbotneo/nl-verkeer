@@ -22,6 +22,7 @@ type TrafficEvent = {
   lastUpdated: string;
   sourceUrl: string;
   source?: 'NDW' | 'ANWB';
+  reasonText?: string;
 };
 
 const i18n = {
@@ -231,6 +232,7 @@ export default function Home() {
                 <th className="text-left p-2">{t.category}</th>
                 <th className="text-right p-2">{t.delay}</th>
                 <th className="text-right p-2">{t.length}</th>
+                <th className="text-left p-2">Reden</th>
                 <th className="text-left p-2">Info</th>
               </tr>
             </thead>
@@ -246,6 +248,9 @@ export default function Home() {
                     {typeof e.lengthKm === 'number' ? `${e.lengthKm} km` : '—'}
                   </td>
                   <td className="p-2">
+                    <div className="line-clamp-2">{e.reasonText || '—'}</div>
+                  </td>
+                  <td className="p-2">
                     <div className="line-clamp-2">{e.locationText || '—'}</div>
                     <a className="text-xs text-blue-600 hover:underline" href={e.sourceUrl} target="_blank" rel="noreferrer">
                       {e.source ?? 'NDW'}
@@ -256,7 +261,7 @@ export default function Home() {
 
               {!loading && events.length === 0 ? (
                 <tr>
-                  <td className="p-3 text-gray-600" colSpan={5}>
+                  <td className="p-3 text-gray-600" colSpan={6}>
                     {t.noResults}
                   </td>
                 </tr>

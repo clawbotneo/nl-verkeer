@@ -142,6 +142,14 @@ export async function fetchAnwbEvents(): Promise<TrafficEvent[]> {
 
     const locationText = from && to ? `${from} → ${to}` : from ?? to;
 
+    const reasonParts: string[] = [];
+    if (typeof seg.reason === 'string' && seg.reason.trim()) reasonParts.push(seg.reason.trim());
+    for (const ev of asArray(seg.events)) {
+      const txt = typeof ev?.text === 'string' ? ev.text.trim() : '';
+      if (txt) reasonParts.push(txt);
+    }
+    const reasonText = reasonParts.length ? Array.from(new Set(reasonParts)).join(' ') : undefined;
+
     out.push({
       id: `anwb:${seg.id}`,
       roadType: rt,
@@ -155,6 +163,7 @@ export async function fetchAnwbEvents(): Promise<TrafficEvent[]> {
       delayMin,
       category,
       eventTypeRaw: `${catRaw}:${String(seg.incidentType ?? '')}`,
+      reasonText,
       lastUpdated: fetchedIso,
       source: 'ANWB',
       sourceUrl: ANWB_FILELIJST_URL,
