@@ -119,8 +119,26 @@ export async function fetchAnwbEvents(): Promise<TrafficEvent[]> {
     const from = typeof seg.from === 'string' ? seg.from : undefined;
     const to = typeof seg.to === 'string' ? seg.to : undefined;
 
-    const lengthKm = typeof seg.distance === 'number' ? seg.distance : undefined;
-    const delayMin = typeof seg.delay === 'number' ? seg.delay : undefined;
+    // ANWB payload uses numeric distance/delay, but units vary in practice.
+    // Observed: distance often in meters (e.g. 1100, 5000) and delay in seconds (e.g. 960 -> 16 minutes).
+    const rawDistance = typeof seg.distance === 'number' ? seg.distance : undefined;
+    const rawDelay = typeof seg.delay === 'number' ? seg.delay : undefined;
+
+    const lengthKm =
+      typeof rawDistance === 'number'
+        ? // Heuristic: values > 50 are almost certainly meters, not km.
+          rawDistance > 50
+          ? rawDistance / 1000
+          : rawDistance
+        : undefined;
+
+    const delayMin =
+      typeof rawDelay === 'number'
+        ? // Heuristic: values > 180 are almost certainly seconds, not minutes.
+          rawDelay > 180
+          ? Math.round(rawDelay / 60)
+          : rawDelay
+        : undefined;
 
     const locationText = from && to ? `${from} → ${to}` : from ?? to;
 
