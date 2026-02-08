@@ -142,29 +142,33 @@ export async function fetchAnwbEvents(): Promise<TrafficEvent[]> {
 
     const locationText = from && to ? `${from} → ${to}` : from ?? to;
 
-    const reasonParts: string[] = [];
-    if (typeof seg.reason === 'string' && seg.reason.trim()) reasonParts.push(seg.reason.trim());
+    const rawParts: string[] = [];
+    if (typeof seg.reason === 'string' && seg.reason.trim()) rawParts.push(seg.reason.trim());
     for (const ev of asArray(seg.events)) {
       const txt = typeof ev?.text === 'string' ? ev.text.trim() : '';
-      if (txt) reasonParts.push(txt);
+      if (txt) rawParts.push(txt);
     }
 
-    // Dedupe with light normalization (ANWB often repeats the same message with/without punctuation).
-    const norm = (s: string) =>
-      s
-        .trim()
-        .replace(/\s+/g, ' ')
-        .replace(/[\s\.;:,-]+$/g, '')
-        .toLowerCase();
+    // Split into smaller phrases so we can dedupe "Dicht. Wegwerkzaamheden." vs "Dicht" + "Wegwerkzaamheden".
+    const phrases: string[] = [];
+    for (const p of rawParts) {
+      for (const piece of p.split(/\.(?:\s+|$)/g)) {
+        const s = piece.trim();
+        if (s) phrases.push(s);
+      }
+    }
+
+    const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
 
     const uniq = new Map<string, string>();
-    for (const p of reasonParts) {
-      const k = norm(p);
+    for (const ph of phrases) {
+      const cleaned = ph.replace(/[\s\.;:,-]+$/g, '').trim();
+      const k = norm(cleaned);
       if (!k) continue;
-      if (!uniq.has(k)) uniq.set(k, p.trim());
+      if (!uniq.has(k)) uniq.set(k, cleaned);
     }
 
-    const reasonText = uniq.size ? Array.from(uniq.values()).join(' ') : undefined;
+    const reasonText = uniq.size ? Array.from(uniq.values()).join('. ') + '.' : undefined;
 
     out.push({
       id: `anwb:${seg.id}`,
