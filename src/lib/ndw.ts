@@ -3,9 +3,12 @@
 import { XMLParser } from 'fast-xml-parser';
 import yauzl from 'yauzl';
 import { DBFFile } from 'dbffile';
+import sax from 'sax';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
+import { Readable } from 'node:stream';
 import type { TrafficEvent, EventCategory } from './types';
 
 const NDW_OPEN_DATA_BASE = 'https://opendata.ndw.nu';
@@ -228,11 +231,246 @@ function safeIso(ts: any): string {
 }
 
 export async function fetchNdwEvents(): Promise<TrafficEvent[]> {
-  const [jams, incidents] = await Promise.all([
-    fetchNdwDatexFeed('actueel_beeld.xml.gz', 'actueel_beeld'),
+  const [measuredJams, incidents] = await Promise.all([
+    // Prefer measured travel time: yields actual delay minutes.
+    fetchNdwMeasuredJamsFromTravelTime(),
     fetchNdwDatexFeed('incidents.xml.gz', 'incidents'),
   ]);
-  return [...jams, ...incidents];
+  return [...measuredJams, ...incidents];
+}
+
+type MeasurementSiteCache = {
+  fetchedAt: number;
+  // measurementSiteReference id -> { roadCode, name }
+  sites: Map<string, { roadCode?: string; name?: string }>;
+};
+
+declare global {
+  var __nlVerkeerMeasurementSiteCache: MeasurementSiteCache | undefined;
+}
+
+const MEASUREMENT_SITE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function roundTo5Min(n: number): number {
+  return Math.round(n / 5) * 5;
+}
+
+function guessLengthKmFromReference(roadCode: string, refSeconds: number): number {
+  // crude but ok for MVP: assume freeflow speed
+  const isA = roadCode.startsWith('A');
+  const kmh = isA ? 100 : 80;
+  const km = (refSeconds / 3600) * kmh;
+  return Math.max(0.1, Math.round(km * 10) / 10);
+}
+
+async function getMeasurementSitesFor(ids: Set<string>): Promise<Map<string, { roadCode?: string; name?: string }>> {
+  const now = Date.now();
+  const cached = globalThis.__nlVerkeerMeasurementSiteCache;
+  if (cached && now - cached.fetchedAt < MEASUREMENT_SITE_CACHE_TTL_MS) {
+    return cached.sites;
+  }
+
+  // If we don't need any ids, short-circuit.
+  if (ids.size === 0) {
+    const sites = new Map<string, { roadCode?: string; name?: string }>();
+    globalThis.__nlVerkeerMeasurementSiteCache = { fetchedAt: now, sites };
+    return sites;
+  }
+
+  const url = `${NDW_OPEN_DATA_BASE}/measurement_current.xml.gz`;
+
+  let res: Response | null = null;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`Failed to fetch measurement_current.xml.gz: ${res.status}`);
+      break;
+    } catch (e) {
+      lastErr = e;
+      // small backoff
+      await new Promise((r) => setTimeout(r, 500 * attempt));
+    }
+  }
+  if (!res) throw lastErr ?? new Error('Failed to fetch measurement_current.xml.gz');
+
+  const vildRoadMap = await getVildRoadMap();
+
+  const sites = new Map<string, { roadCode?: string; name?: string }>();
+
+  // Stream-parse the huge XML. We only keep entries we care about, and stop early when done.
+  const parser = sax.parser(false, { lowercase: true });
+  let currentId: string | null = null;
+  let inWanted = false;
+  let text = '';
+  const stack: string[] = [];
+
+  function curPath() {
+    return stack.join('/');
+  }
+
+  let currentName: string | undefined;
+  let specificLoc: number | undefined;
+
+  parser.onopentag = (node: any) => {
+    stack.push(node.name);
+    text = '';
+
+    if (node.name === 'measurementsiterecord') {
+      const id = node.attributes?.id;
+      currentId = typeof id === 'string' ? id : null;
+      inWanted = !!currentId && ids.has(currentId);
+      currentName = undefined;
+      specificLoc = undefined;
+    }
+  };
+
+  parser.ontext = (t: string) => {
+    if (inWanted) text += t;
+  };
+
+  parser.onclosetag = (name: string) => {
+    if (inWanted) {
+      const p = curPath();
+      const val = text.trim();
+
+      if (val) {
+        if (p.endsWith('measurementsitename/values/value')) {
+          currentName = val;
+        }
+        if (p.endsWith('alertcpoint/alertcmethod2primarypointlocation/alertclocation/specificlocation')) {
+          const n = Number(val);
+          if (Number.isFinite(n)) specificLoc = n;
+        }
+      }
+
+      if (name === 'measurementsiterecord' && currentId) {
+        const roadCode = typeof specificLoc === 'number' ? vildRoadMap.get(specificLoc) : undefined;
+        sites.set(currentId, { roadCode, name: currentName });
+      }
+    }
+
+    if (name === 'measurementsiterecord') {
+      currentId = null;
+      inWanted = false;
+      currentName = undefined;
+      specificLoc = undefined;
+    }
+
+    stack.pop();
+    text = '';
+  };
+
+  // Pipe response through gunzip into sax.
+  await new Promise<void>((resolve, reject) => {
+    const gunzip = zlib.createGunzip();
+    gunzip.on('data', (chunk) => {
+      try {
+        parser.write(chunk.toString('utf8'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+    gunzip.on('end', () => resolve());
+    gunzip.on('error', reject);
+
+    const webStream = res.body as any;
+    if (!webStream) return reject(new Error('No response body'));
+    const nodeStream = Readable.fromWeb(webStream);
+    nodeStream.pipe(gunzip);
+  });
+
+  globalThis.__nlVerkeerMeasurementSiteCache = { fetchedAt: now, sites };
+  return sites;
+}
+
+async function fetchNdwMeasuredJamsFromTravelTime(): Promise<TrafficEvent[]> {
+  const pathName = 'traveltime.xml.gz';
+  const url = `${NDW_OPEN_DATA_BASE}/${pathName}`;
+
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to fetch NDW feed ${pathName}: ${res.status}`);
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  const xml = zlib.gunzipSync(buf).toString('utf8');
+  const parser = xmlParser();
+  const doc = parser.parse(xml);
+
+  const pp = doc?.Envelope?.Body?.d2LogicalModel?.payloadPublication;
+  const publicationTime = safeIso(pp?.publicationTime);
+  const siteMeasurements = asArray(pp?.siteMeasurements);
+
+  // First pass: compute delays and keep only the sites that qualify as "file".
+  type JamCandidate = {
+    siteId: string;
+    curDur: number;
+    refDur: number;
+    delayMin: number;
+  };
+
+  const candidates: JamCandidate[] = [];
+  const wantedIds = new Set<string>();
+
+  for (const sm of siteMeasurements) {
+    const siteId = sm?.measurementSiteReference?.['@_id'];
+    if (typeof siteId !== 'string') continue;
+
+    const mv = asArray(sm?.measuredValue)?.[0]?.measuredValue;
+    const basic = mv?.basicData;
+    if (!basic) continue;
+
+    const curDur = Number(basic?.travelTime?.duration);
+    const refDur = Number(
+      mv?.measuredValueExtension?.measuredValueExtended?.basicDataReferenceValue?.travelTimeData?.travelTime?.duration
+    );
+
+    if (!Number.isFinite(curDur) || !Number.isFinite(refDur)) continue;
+
+    const delayMinRaw = (curDur - refDur) / 60;
+    if (!Number.isFinite(delayMinRaw)) continue;
+
+    const delayMin = roundTo5Min(delayMinRaw);
+    if (delayMin < 5) continue;
+
+    candidates.push({ siteId, curDur, refDur, delayMin });
+    wantedIds.add(siteId);
+  }
+
+  const siteInfo = await getMeasurementSitesFor(wantedIds);
+
+  const out: TrafficEvent[] = [];
+
+  for (const c of candidates) {
+    const info = siteInfo.get(c.siteId);
+    const roadCode = info?.roadCode;
+    if (!roadCode) continue;
+
+    const delayMin = c.delayMin;
+    const refDur = c.refDur;
+
+    const roadType = roadCode.startsWith('A') ? 'A' : 'N';
+    const roadNumber = Number(roadCode.slice(1));
+    if (!Number.isFinite(roadNumber)) continue;
+
+    const lengthKm = guessLengthKmFromReference(roadCode, refDur);
+
+    out.push({
+      id: `NDW:traveltime:${c.siteId}`,
+      roadType,
+      roadNumber,
+      roadCode,
+      category: 'jam',
+      eventTypeRaw: 'MeasuredTravelTime',
+      locationText: info?.name,
+      lengthKm,
+      delayMin,
+      lastUpdated: publicationTime,
+      source: 'NDW',
+      sourceUrl: url,
+    });
+  }
+
+  return out;
 }
 
 async function fetchNdwDatexFeed(

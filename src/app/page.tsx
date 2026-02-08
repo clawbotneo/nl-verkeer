@@ -219,31 +219,45 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {events.map((e) => (
-                <tr key={e.id} className="border-t">
-                  <td className="p-2 font-mono">{e.roadCode}</td>
-                  <td className="p-2">
-                    {e.category === 'jam' ? t.jams : t.accidents}
-                  </td>
-                  <td className="p-2 text-right font-mono">
-                    {typeof e.delayMin === 'number' ? `${e.delayMin} min` : '—'}
-                  </td>
-                  <td className="p-2 text-right font-mono">
-                    {typeof e.lengthKm === 'number' ? `${e.lengthKm} km` : '—'}
-                  </td>
-                  <td className="p-2">
-                    <div className="line-clamp-2">{e.locationText || '—'}</div>
-                    <a
-                      className="text-xs text-blue-600 hover:underline"
-                      href={e.sourceUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      NDW
-                    </a>
-                  </td>
-                </tr>
-              ))}
+              {(() => {
+                const groups = new Map<string, TrafficEvent[]>();
+                for (const e of events) {
+                  const k = e.roadCode;
+                  const arr = groups.get(k);
+                  if (arr) arr.push(e);
+                  else groups.set(k, [e]);
+                }
+
+                return Array.from(groups.entries()).flatMap(([roadCode, items]) =>
+                  items.map((e, idx) => (
+                    <tr key={e.id} className="border-t">
+                      {idx === 0 ? (
+                        <td className="p-2 font-mono align-top" rowSpan={items.length}>
+                          {roadCode}
+                        </td>
+                      ) : null}
+                      <td className="p-2">{e.category === 'jam' ? t.jams : t.accidents}</td>
+                      <td className="p-2 text-right font-mono">
+                        {typeof e.delayMin === 'number' ? `${e.delayMin} min` : '—'}
+                      </td>
+                      <td className="p-2 text-right font-mono">
+                        {typeof e.lengthKm === 'number' ? `${e.lengthKm} km` : '—'}
+                      </td>
+                      <td className="p-2">
+                        <div className="line-clamp-2">{e.locationText || '—'}</div>
+                        <a
+                          className="text-xs text-blue-600 hover:underline"
+                          href={e.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          NDW
+                        </a>
+                      </td>
+                    </tr>
+                  ))
+                );
+              })()}
 
               {!loading && events.length === 0 ? (
                 <tr>
