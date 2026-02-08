@@ -233,7 +233,7 @@ function safeIso(ts: any): string {
 export async function fetchNdwEvents(): Promise<TrafficEvent[]> {
   const [measuredJams, incidents] = await Promise.all([
     // Prefer measured travel time: yields actual delay minutes.
-    fetchNdwMeasuredJamsFromTravelTime(),
+    fetchNdwMeasuredJamsFromTravelTime().catch(() => []),
     fetchNdwDatexFeed('incidents.xml.gz', 'incidents'),
   ]);
   return [...measuredJams, ...incidents];
@@ -297,6 +297,7 @@ async function getMeasurementSitesFor(ids: Set<string>): Promise<Map<string, { r
   const vildRoadMap = await getVildRoadMap();
 
   const sites = new Map<string, { roadCode?: string; name?: string }>();
+  const remaining = new Set(ids);
 
   // Stream-parse the huge XML. We only keep entries we care about, and stop early when done.
   const parser = sax.parser(false, { lowercase: true });
@@ -347,6 +348,7 @@ async function getMeasurementSitesFor(ids: Set<string>): Promise<Map<string, { r
       if (name === 'measurementsiterecord' && currentId) {
         const roadCode = typeof specificLoc === 'number' ? vildRoadMap.get(specificLoc) : undefined;
         sites.set(currentId, { roadCode, name: currentName });
+        remaining.delete(currentId);
       }
     }
 
@@ -364,19 +366,37 @@ async function getMeasurementSitesFor(ids: Set<string>): Promise<Map<string, { r
   // Pipe response through gunzip into sax.
   await new Promise<void>((resolve, reject) => {
     const gunzip = zlib.createGunzip();
+
+    const finish = () => {
+      try {
+        gunzip.removeAllListeners();
+      } catch {}
+      resolve();
+    };
+
     gunzip.on('data', (chunk) => {
       try {
         parser.write(chunk.toString('utf8'));
+        if (remaining.size === 0) {
+          // We found all requested ids; stop parsing early.
+          gunzip.destroy();
+          finish();
+        }
       } catch (e) {
         reject(e);
       }
     });
     gunzip.on('end', () => resolve());
-    gunzip.on('error', reject);
+    gunzip.on('error', (e) => {
+      // If we destroyed intentionally (early stop), ignore.
+      if ((e as any)?.code === 'ERR_STREAM_PREMATURE_CLOSE' && remaining.size === 0) return resolve();
+      reject(e);
+    });
 
     const webStream = res.body as any;
     if (!webStream) return reject(new Error('No response body'));
     const nodeStream = Readable.fromWeb(webStream);
+    nodeStream.on('error', reject);
     nodeStream.pipe(gunzip);
   });
 
