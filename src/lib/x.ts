@@ -3,7 +3,8 @@
 // Minimal X API client for fetching extra traffic context from @RWSverkeersinfo.
 // Uses official X API v2 recent search.
 
-const X_API_BASE = 'https://api.x.com/2';
+// X currently supports both api.x.com and api.twitter.com; keep a fallback for reliability.
+const X_API_BASES = ['https://api.x.com/2', 'https://api.twitter.com/2'];
 
 export type ExternalPost = {
   id: string;
@@ -62,30 +63,41 @@ export async function fetchRwsExternalInfoForRoad(roadCode: string): Promise<Ext
   // Query: match road code mentions from the specific account.
   // Note: X query syntax is space-separated terms (AND).
   const q = `from:RWSverkeersinfo ${rc} -is:retweet`;
-  const url = new URL(`${X_API_BASE}/tweets/search/recent`);
-  url.searchParams.set('query', q);
-  url.searchParams.set('max_results', '5');
-  url.searchParams.set('tweet.fields', 'created_at');
-
+  // Try both base URLs; some accounts/tiers behave differently.
+  const urls = X_API_BASES.map((b) => {
+    const u = new URL(`${b}/tweets/search/recent`);
+    u.searchParams.set('query', q);
+    u.searchParams.set('max_results', '5');
+    u.searchParams.set('tweet.fields', 'created_at');
+    return u;
+  });
   try {
-    const json = await withTimeout(
-      fetch(url.toString(), {
-        cache: 'no-store',
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: 'application/json',
-          'user-agent': 'nl-verkeer/1.0 (+https://github.com/clawbotneo/nl-verkeer)',
-        },
-      }).then(async (r) => {
-        if (!r.ok) {
-          const body = await r.text().catch(() => '');
-          throw new Error(`X API HTTP ${r.status} ${body ? `- ${body.slice(0, 200)}` : ''}`);
-        }
-        return (await r.json()) as any;
-      }),
-      5000,
-      'fetchRwsExternalInfoForRoad'
-    );
+    let json: any | undefined;
+    for (const u of urls) {
+      try {
+        json = await withTimeout(
+          fetch(u.toString(), {
+            cache: 'no-store',
+            headers: {
+              authorization: `Bearer ${token}`,
+              accept: 'application/json',
+              'user-agent': 'nl-verkeer/1.0 (+https://github.com/clawbotneo/nl-verkeer)',
+            },
+          }).then(async (r) => {
+            if (!r.ok) {
+              const body = await r.text().catch(() => '');
+              throw new Error(`X API HTTP ${r.status} ${body ? `- ${body.slice(0, 200)}` : ''}`);
+            }
+            return (await r.json()) as any;
+          }),
+          5000,
+          'fetchRwsExternalInfoForRoad'
+        );
+        break;
+      } catch {
+        // try next base
+      }
+    }
 
     const first = Array.isArray(json?.data) ? json.data[0] : undefined;
     const post: ExternalPost | undefined =
