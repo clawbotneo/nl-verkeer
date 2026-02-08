@@ -245,12 +245,16 @@ function safeIso(ts: any): string {
 }
 
 export async function fetchNdwEvents(): Promise<TrafficEvent[]> {
-  const [measuredJams, incidents] = await Promise.all([
+  const [measuredJams, incidents, riskJams] = await Promise.all([
     // Prefer measured travel time: yields actual delay minutes.
     fetchNdwMeasuredJamsFromTravelTime().catch(() => []),
     fetchNdwDatexFeed('incidents.xml.gz', 'incidents'),
+    // Fallback if measured jams are temporarily unavailable.
+    fetchNdwDatexFeed('actueel_beeld.xml.gz', 'actueel_beeld').catch(() => []),
   ]);
-  return [...measuredJams, ...incidents];
+
+  const jams = measuredJams.length > 0 ? measuredJams : riskJams;
+  return [...jams, ...incidents];
 }
 
 type MeasurementSiteCache = {
@@ -477,30 +481,62 @@ async function fetchNdwMeasuredJamsFromTravelTime(): Promise<TrafficEvent[]> {
 
   const siteInfo = await getMeasurementSitesFor(wantedIds);
 
-  const out: TrafficEvent[] = [];
+  // Aggregate per road: individual travel-time segments often have small delays,
+  // but summed over a corridor they form a real "file".
+  const byRoad = new Map<
+    string,
+    { delayMinRawSum: number; lengthKmSum: number; sampleNames: string[]; siteCount: number }
+  >();
 
   for (const c of top) {
     const info = siteInfo.get(c.siteId);
     const roadCode = info?.roadCode;
     if (!roadCode) continue;
 
-    const delayMin = c.delayMin;
-    const refDur = c.refDur;
+    const delayMinRaw = (c.curDur - c.refDur) / 60;
+    if (!Number.isFinite(delayMinRaw) || delayMinRaw <= 0) continue;
+
+    const lengthKm = guessLengthKmFromReference(roadCode, c.refDur);
+
+    const entry = byRoad.get(roadCode) ?? {
+      delayMinRawSum: 0,
+      lengthKmSum: 0,
+      sampleNames: [],
+      siteCount: 0,
+    };
+
+    entry.delayMinRawSum += delayMinRaw;
+    entry.lengthKmSum += lengthKm;
+    entry.siteCount += 1;
+    if (info?.name && entry.sampleNames.length < 3) entry.sampleNames.push(info.name);
+
+    byRoad.set(roadCode, entry);
+  }
+
+  const out: TrafficEvent[] = [];
+
+  for (const [roadCode, agg] of byRoad.entries()) {
+    const delayMin = roundTo5Min(agg.delayMinRawSum);
+    if (delayMin < 5) continue;
 
     const roadType = roadCode.startsWith('A') ? 'A' : 'N';
     const roadNumber = Number(roadCode.slice(1));
     if (!Number.isFinite(roadNumber)) continue;
 
-    const lengthKm = guessLengthKmFromReference(roadCode, refDur);
+    const lengthKm = Math.round(agg.lengthKmSum * 10) / 10;
+    const locationText =
+      agg.sampleNames.length > 0
+        ? `${agg.sampleNames.join(' · ')}${agg.siteCount > agg.sampleNames.length ? ` (+${agg.siteCount - agg.sampleNames.length} meer)` : ''}`
+        : `${agg.siteCount} meetvakken`;
 
     out.push({
-      id: `NDW:traveltime:${c.siteId}`,
+      id: `NDW:traveltime:${roadCode}:${publicationTime}`,
       roadType,
       roadNumber,
       roadCode,
       category: 'jam',
-      eventTypeRaw: 'MeasuredTravelTime',
-      locationText: info?.name,
+      eventTypeRaw: 'MeasuredTravelTime(Aggregated)',
+      locationText,
       lengthKm,
       delayMin,
       lastUpdated: publicationTime,
