@@ -249,12 +249,15 @@ export async function fetchNdwEvents(): Promise<TrafficEvent[]> {
     // Prefer measured travel time: yields actual delay minutes.
     fetchNdwMeasuredJamsFromTravelTime().catch(() => []),
     fetchNdwDatexFeed('incidents.xml.gz', 'incidents'),
-    // Fallback if measured jams are temporarily unavailable.
+    // Extra signal: "risk of congestion" situations. Not all include delay, but helps coverage.
     fetchNdwDatexFeed('actueel_beeld.xml.gz', 'actueel_beeld').catch(() => []),
   ]);
 
-  const jams = measuredJams.length > 0 ? measuredJams : riskJams;
-  return [...jams, ...incidents];
+  // Merge: show measured jams first, then add risk jams for roads not already present.
+  const measuredRoads = new Set(measuredJams.map((e) => e.roadCode));
+  const mergedJams = [...measuredJams, ...riskJams.filter((e) => !measuredRoads.has(e.roadCode))];
+
+  return [...mergedJams, ...incidents];
 }
 
 type MeasurementSiteCache = {
@@ -356,9 +359,11 @@ async function getMeasurementSitesFor(ids: Set<string>): Promise<Map<string, { r
         if (p.endsWith('measurementsitename/values/value')) {
           currentName = val;
         }
-        if (p.endsWith('alertcpoint/alertcmethod2primarypointlocation/alertclocation/specificlocation')) {
+        // Measurement site records can embed Alert-C references in different structures.
+        // Any specificLocation we see is useful to map to a road via VILD.
+        if (p.endsWith('specificlocation')) {
           const n = Number(val);
-          if (Number.isFinite(n)) specificLoc = n;
+          if (Number.isFinite(n)) specificLoc ??= n;
         }
       }
 
