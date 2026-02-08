@@ -1,7 +1,15 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { XMLParser } from 'fast-xml-parser';
+import yauzl from 'yauzl';
+import { DBFFile } from 'dbffile';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { TrafficEvent, EventCategory } from './types';
 
 const NDW_OPEN_DATA_BASE = 'https://opendata.ndw.nu';
+const VILD_ZIP_NAME = 'VILD6.13.A.zip';
 
 function xmlParser() {
   return new XMLParser({
@@ -31,8 +39,125 @@ function pickFirstText(node: any): string | undefined {
   return undefined;
 }
 
-function parseRoadCodeFromSituationRecord(sr: any): string | undefined {
-  // Most useful: groupOfLocations ... roadsideReferencePoint ... roadName
+type VildCache = {
+  fetchedAt: number;
+  roadBySpecificLocation: Map<number, string>; // e.g. 7200 -> "A10"
+};
+
+declare global {
+  var __nlVerkeerVildCache: VildCache | undefined;
+}
+
+const VILD_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function asNumber(v: any): number | undefined {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+}
+
+async function extractZipEntryToFile(zipPath: string, entryName: string, outPath: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zip) => {
+      if (err || !zip) return reject(err ?? new Error('Failed to open zip'));
+
+      let done = false;
+      zip.readEntry();
+      zip.on('entry', (e) => {
+        if (done) return;
+        if (e.fileName === entryName) {
+          zip.openReadStream(e, (err, rs) => {
+            if (err || !rs) return reject(err ?? new Error('Failed to open zip entry stream'));
+            const ws = fs.createWriteStream(outPath);
+            rs.pipe(ws);
+            ws.on('finish', () => {
+              done = true;
+              resolve();
+            });
+            ws.on('error', reject);
+          });
+        } else {
+          zip.readEntry();
+        }
+      });
+      zip.on('end', () => {
+        if (!done) reject(new Error(`Zip entry not found: ${entryName}`));
+      });
+    });
+  });
+}
+
+async function getVildRoadMap(): Promise<Map<number, string>> {
+  const now = Date.now();
+  const cached = globalThis.__nlVerkeerVildCache;
+  if (cached && now - cached.fetchedAt < VILD_CACHE_TTL_MS) return cached.roadBySpecificLocation;
+
+  // Download VILD location table zip (Alert-C). We parse the DBF for road numbers.
+  const zipUrl = `${NDW_OPEN_DATA_BASE}/${VILD_ZIP_NAME}`;
+  const res = await fetch(zipUrl, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to fetch ${VILD_ZIP_NAME}: ${res.status}`);
+
+  const tmpDir = path.join(os.tmpdir(), 'nl-verkeer');
+  fs.mkdirSync(tmpDir, { recursive: true });
+
+  const zipPath = path.join(tmpDir, VILD_ZIP_NAME);
+  fs.writeFileSync(zipPath, Buffer.from(await res.arrayBuffer()));
+
+  const dbfName = 'VILD6.13.A.dbf';
+  const dbfPath = path.join(tmpDir, dbfName);
+  await extractZipEntryToFile(zipPath, dbfName, dbfPath);
+
+  const dbf = await DBFFile.open(dbfPath);
+  const map = new Map<number, string>();
+
+  // Read all records; recordCount ~12k so this is fine.
+  let remaining = dbf.recordCount;
+  while (remaining > 0) {
+    const chunk = await dbf.readRecords(Math.min(5000, remaining));
+    remaining -= chunk.length;
+    for (const r of chunk as any[]) {
+      const loc = asNumber(r.LOC_NR);
+      const road = typeof r.ROADNUMBER === 'string' ? r.ROADNUMBER.trim().toUpperCase().replace(/\s+/g, '') : '';
+      if (loc && road && /^(A|N)\d{1,3}$/i.test(road)) {
+        map.set(loc, road);
+      }
+    }
+  }
+
+  globalThis.__nlVerkeerVildCache = { fetchedAt: now, roadBySpecificLocation: map };
+  return map;
+}
+
+function collectSpecificLocationsDeep(obj: any): number[] {
+  const out: number[] = [];
+  const stack: any[] = [obj];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (!cur) continue;
+    if (Array.isArray(cur)) {
+      for (const v of cur) stack.push(v);
+      continue;
+    }
+    if (typeof cur !== 'object') continue;
+
+    if ('specificLocation' in cur) {
+      const n = asNumber((cur as any).specificLocation);
+      if (typeof n === 'number') out.push(n);
+    }
+
+    for (const v of Object.values(cur)) {
+      if (!v) continue;
+      if (typeof v === 'object') stack.push(v);
+    }
+  }
+  return out;
+}
+
+async function parseRoadCodeFromSituationRecord(sr: any): Promise<string | undefined> {
+  // Try direct road name fields (older feeds)
   const roadName =
     pickFirstText(
       sr?.groupOfLocations?.roadsideReferencePoint?.roadName ??
@@ -42,10 +167,20 @@ function parseRoadCodeFromSituationRecord(sr: any): string | undefined {
 
   if (roadName && /^(A|N)\d+$/i.test(roadName.trim())) return roadName.trim().toUpperCase();
 
-  // Fallback: sometimes road name appears in comments
+  // Sometimes road name appears in comments
   const comment = pickFirstText(sr?.generalPublicComment?.comment);
   const m = comment?.match(/\b([AN]\s?\d{1,3})\b/i);
   if (m) return m[1].replace(/\s+/g, '').toUpperCase();
+
+  // DATEX feeds increasingly use Alert-C / specificLocation references. Map those via VILD.
+  const specificLocations = collectSpecificLocationsDeep(sr?.locationReference ?? sr?.groupOfLocations);
+  if (specificLocations.length) {
+    const roadMap = await getVildRoadMap();
+    for (const loc of specificLocations) {
+      const road = roadMap.get(loc);
+      if (road) return road;
+    }
+  }
 
   return undefined;
 }
@@ -63,7 +198,9 @@ function parseLengthKm(sr: any): number | undefined {
     sr?.lengthAffected?.distance ??
     sr?.distanceAffected?.distance ??
     sr?.queueLength?.distance ??
-    sr?.trafficJamLength?.distance;
+    sr?.trafficJamLength?.distance ??
+    sr?.queueLength;
+
   const n = typeof meters === 'string' ? Number(meters) : typeof meters === 'number' ? meters : undefined;
   if (!n || !Number.isFinite(n)) return undefined;
   return Math.round((n / 1000) * 10) / 10;
@@ -99,15 +236,14 @@ export async function fetchNdwEvents(): Promise<TrafficEvent[]> {
 }
 
 async function fetchNdwDatexFeed(
-  path: string,
+  pathName: string,
   feedHint: 'incidents' | 'actueel_beeld'
 ): Promise<TrafficEvent[]> {
-  const url = `${NDW_OPEN_DATA_BASE}/${path}`;
+  const url = `${NDW_OPEN_DATA_BASE}/${pathName}`;
   const res = await fetch(url, {
-    // Allow Next.js route handlers to cache/revalidate separately; we do our own cache.
     cache: 'no-store',
   });
-  if (!res.ok) throw new Error(`Failed to fetch NDW feed ${path}: ${res.status}`);
+  if (!res.ok) throw new Error(`Failed to fetch NDW feed ${pathName}: ${res.status}`);
 
   const buf = Buffer.from(await res.arrayBuffer());
   const { gunzipSync } = await import('node:zlib');
@@ -116,31 +252,28 @@ async function fetchNdwDatexFeed(
   const parser = xmlParser();
   const doc = parser.parse(xml);
 
-  // SOAP envelope sometimes present
-  const logicalModel =
-    doc?.Envelope?.Body?.d2LogicalModel ??
-    doc?.['SOAP:Envelope']?.['SOAP:Body']?.d2LogicalModel ??
-    doc?.['SOAP:Envelope']?.['SOAP:Body']?.['d2LogicalModel'] ??
-    doc?.d2LogicalModel;
+  // NDW is migrating away from DATEX II v2 SOAP. We support:
+  // - DATEX II v2 (SOAP Envelope -> d2LogicalModel -> payloadPublication)
+  // - DATEX II v3 messageContainer (messageContainer.payload)
+  const v2PayloadPublication = doc?.Envelope?.Body?.d2LogicalModel?.payloadPublication;
+  const v3Payload = doc?.messageContainer?.payload;
 
-  const payloadPublication = logicalModel?.payloadPublication;
-  const publicationTime = safeIso(payloadPublication?.publicationTime);
-
-  const situations = asArray(payloadPublication?.situation);
+  const publicationTime = safeIso(v2PayloadPublication?.publicationTime ?? v3Payload?.publicationTime);
+  const situations = asArray(v2PayloadPublication?.situation ?? v3Payload?.situation);
 
   const out: TrafficEvent[] = [];
 
   for (const sit of situations) {
-    const sitId = sit?.['@_id'] ?? sit?.id ?? 'unknown';
+    const sitId = sit?.['@_id'] ?? sit?.['@_id'] ?? sit?.id ?? 'unknown';
     const records = asArray(sit?.situationRecord);
 
     for (const sr of records) {
-      const typeRaw = sr?.['@_xsi:type'] ?? sr?.['@_type'] ?? sr?.['@_xsi:type'] ?? sr?.type ?? '';
+      const typeRaw = sr?.['@_xsi:type'] ?? sr?.['@_type'] ?? sr?.['@_type'] ?? sr?.type ?? '';
 
-      // For jams feed, only keep AbnormalTraffic records
+      // For the "actueel beeld" feed, we only want real queues/jams.
       if (feedHint === 'actueel_beeld' && !/AbnormalTraffic/i.test(String(typeRaw))) continue;
 
-      const roadCode = parseRoadCodeFromSituationRecord(sr);
+      const roadCode = await parseRoadCodeFromSituationRecord(sr);
       if (!roadCode) continue;
 
       const roadType = roadCode.startsWith('A') ? 'A' : 'N';
@@ -158,7 +291,10 @@ async function fetchNdwDatexFeed(
         roadCode,
         category,
         eventTypeRaw: String(typeRaw || ''),
-        locationText: pickFirstText(sr?.generalPublicComment?.comment) ?? pickFirstText(sr?.nonGeneralPublicComment?.comment),
+        locationText:
+          pickFirstText(sr?.generalPublicComment?.comment) ??
+          pickFirstText(sr?.nonGeneralPublicComment?.comment) ??
+          pickFirstText(sr?.cause?.causeDescription),
         lengthKm: parseLengthKm(sr),
         delayMin: parseDelayMin(sr),
         lastUpdated: publicationTime,

@@ -40,8 +40,9 @@ export default function RoadPage({ params }: { params: { code: string } }) {
         if (!json.ok) throw new Error(json.error ?? 'API error');
         setEvents(json.events);
         setFetchedAt(json.fetchedAt);
-      } catch (e: any) {
-        setError(e?.message ?? 'Unknown error');
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Unknown error';
+        setError(msg);
       }
     }
 

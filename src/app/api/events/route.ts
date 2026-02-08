@@ -10,7 +10,6 @@ type Cache = {
 const CACHE_TTL_MS = 2 * 60 * 1000;
 
 declare global {
-  // eslint-disable-next-line no-var
   var __nlVerkeerCache: Cache | undefined;
 }
 
@@ -71,11 +70,11 @@ export async function GET(req: Request) {
       count: filtered.length,
       events: filtered,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     return NextResponse.json(
       {
         ok: false,
-        error: err?.message ?? 'Unknown error',
+        error: err instanceof Error ? err.message : 'Unknown error',
       },
       { status: 500 }
     );
