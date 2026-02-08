@@ -21,12 +21,13 @@ type TrafficEvent = {
   delayMin?: number;
   lastUpdated: string;
   sourceUrl: string;
+  source?: 'NDW' | 'ANWB';
 };
 
 const i18n = {
   nl: {
     title: 'Verkeer (NL) — files & ongevallen',
-    subtitle: 'Actuele lijst met filter en sortering. Data: NDW Open Data.',
+    subtitle: 'Actuele lijst met filter en sortering. Data: ANWB (scrape) of NDW Open Data.',
     lang: 'Taal',
     roadType: 'Wegtype',
     road: 'Weg',
@@ -45,7 +46,7 @@ const i18n = {
   },
   en: {
     title: 'Traffic (NL) — jams & accidents',
-    subtitle: 'Live list with filters and sorting. Data: NDW Open Data.',
+    subtitle: 'Live list with filters and sorting. Data: ANWB (scrape) or NDW Open Data.',
     lang: 'Language',
     roadType: 'Road type',
     road: 'Road',
@@ -78,7 +79,8 @@ export default function Home() {
 
   const [roadType, setRoadType] = useState<RoadType>('ALL');
   const [roadInput, setRoadInput] = useState('');
-  const [category, setCategory] = useState<Category>('all');
+  // Default to files-only (matches the main use-case)
+  const [category, setCategory] = useState<Category>('jam');
   const [sort, setSort] = useState<Sort>('road');
 
   const [events, setEvents] = useState<TrafficEvent[]>([]);
@@ -246,7 +248,7 @@ export default function Home() {
                   <td className="p-2">
                     <div className="line-clamp-2">{e.locationText || '—'}</div>
                     <a className="text-xs text-blue-600 hover:underline" href={e.sourceUrl} target="_blank" rel="noreferrer">
-                      NDW
+                      {e.source ?? 'NDW'}
                     </a>
                   </td>
                 </tr>
