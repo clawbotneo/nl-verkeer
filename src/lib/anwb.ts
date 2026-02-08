@@ -148,7 +148,23 @@ export async function fetchAnwbEvents(): Promise<TrafficEvent[]> {
       const txt = typeof ev?.text === 'string' ? ev.text.trim() : '';
       if (txt) reasonParts.push(txt);
     }
-    const reasonText = reasonParts.length ? Array.from(new Set(reasonParts)).join(' ') : undefined;
+
+    // Dedupe with light normalization (ANWB often repeats the same message with/without punctuation).
+    const norm = (s: string) =>
+      s
+        .trim()
+        .replace(/\s+/g, ' ')
+        .replace(/[\s\.;:,-]+$/g, '')
+        .toLowerCase();
+
+    const uniq = new Map<string, string>();
+    for (const p of reasonParts) {
+      const k = norm(p);
+      if (!k) continue;
+      if (!uniq.has(k)) uniq.set(k, p.trim());
+    }
+
+    const reasonText = uniq.size ? Array.from(uniq.values()).join(' ') : undefined;
 
     out.push({
       id: `anwb:${seg.id}`,
