@@ -14,6 +14,20 @@ import type { TrafficEvent, EventCategory } from './types';
 const NDW_OPEN_DATA_BASE = 'https://opendata.ndw.nu';
 const VILD_ZIP_NAME = 'VILD6.13.A.zip';
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
+  const ac = new AbortController();
+  const id = setTimeout(() => ac.abort(), ms);
+  try {
+    return await fetch(url, { cache: 'no-store', signal: ac.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 function xmlParser() {
   return new XMLParser({
     ignoreAttributes: false,
@@ -100,7 +114,7 @@ async function getVildRoadMap(): Promise<Map<number, string>> {
 
   // Download VILD location table zip (Alert-C). We parse the DBF for road numbers.
   const zipUrl = `${NDW_OPEN_DATA_BASE}/${VILD_ZIP_NAME}`;
-  const res = await fetch(zipUrl, { cache: 'no-store' });
+  const res = await fetchWithTimeout(zipUrl, 8000);
   if (!res.ok) throw new Error(`Failed to fetch ${VILD_ZIP_NAME}: ${res.status}`);
 
   const tmpDir = path.join(os.tmpdir(), 'nl-verkeer');
@@ -283,13 +297,12 @@ async function getMeasurementSitesFor(ids: Set<string>): Promise<Map<string, { r
   let lastErr: unknown = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      res = await fetch(url, { cache: 'no-store' });
+      res = await fetchWithTimeout(url, 8000);
       if (!res.ok) throw new Error(`Failed to fetch measurement_current.xml.gz: ${res.status}`);
       break;
     } catch (e) {
       lastErr = e;
-      // small backoff
-      await new Promise((r) => setTimeout(r, 500 * attempt));
+      await sleep(500 * attempt);
     }
   }
   if (!res) throw lastErr ?? new Error('Failed to fetch measurement_current.xml.gz');
@@ -408,7 +421,7 @@ async function fetchNdwMeasuredJamsFromTravelTime(): Promise<TrafficEvent[]> {
   const pathName = 'traveltime.xml.gz';
   const url = `${NDW_OPEN_DATA_BASE}/${pathName}`;
 
-  const res = await fetch(url, { cache: 'no-store' });
+  const res = await fetchWithTimeout(url, 8000);
   if (!res.ok) throw new Error(`Failed to fetch NDW feed ${pathName}: ${res.status}`);
 
   const buf = Buffer.from(await res.arrayBuffer());
@@ -504,9 +517,7 @@ async function fetchNdwDatexFeed(
   feedHint: 'incidents' | 'actueel_beeld'
 ): Promise<TrafficEvent[]> {
   const url = `${NDW_OPEN_DATA_BASE}/${pathName}`;
-  const res = await fetch(url, {
-    cache: 'no-store',
-  });
+  const res = await fetchWithTimeout(url, 8000);
   if (!res.ok) throw new Error(`Failed to fetch NDW feed ${pathName}: ${res.status}`);
 
   const buf = Buffer.from(await res.arrayBuffer());

@@ -45,15 +45,41 @@ function applyFilterSort(events: TrafficEvent[], q: EventsQuery): TrafficEvent[]
   return out;
 }
 
-async function getEventsFresh(): Promise<Cache> {
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error(`Timeout after ${ms}ms (${label})`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(id);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(id);
+        reject(e);
+      }
+    );
+  });
+}
+
+async function getEventsFresh(): Promise<{ cache: Cache; stale: boolean; warning?: string }> {
   const now = Date.now();
   const cache = globalThis.__nlVerkeerCache;
-  if (cache && now - cache.fetchedAt < CACHE_TTL_MS) return cache;
+  if (cache && now - cache.fetchedAt < CACHE_TTL_MS) return { cache, stale: false };
 
-  const events = await fetchNdwEvents();
-  const next: Cache = { fetchedAt: now, events };
-  globalThis.__nlVerkeerCache = next;
-  return next;
+  try {
+    // Hard cap to keep API responsive even if NDW is slow.
+    const events = await withTimeout(fetchNdwEvents(), 8000, 'fetchNdwEvents');
+    const next: Cache = { fetchedAt: now, events };
+    globalThis.__nlVerkeerCache = next;
+    return { cache: next, stale: false };
+  } catch (e: unknown) {
+    // Fallback: serve last known data (even if stale) instead of timing out.
+    if (cache) {
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      return { cache, stale: true, warning: `Serving stale data: ${msg}` };
+    }
+    throw e;
+  }
 }
 
 export async function GET(req: Request) {
@@ -61,11 +87,13 @@ export async function GET(req: Request) {
   const q = parseQuery(url);
 
   try {
-    const cache = await getEventsFresh();
+    const { cache, stale, warning } = await getEventsFresh();
     const filtered = applyFilterSort(cache.events, q);
 
     return NextResponse.json({
       ok: true,
+      stale,
+      warning,
       fetchedAt: new Date(cache.fetchedAt).toISOString(),
       count: filtered.length,
       events: filtered,
