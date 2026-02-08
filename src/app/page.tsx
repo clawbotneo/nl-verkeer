@@ -8,7 +8,7 @@ type RoadType = 'A' | 'N' | 'ALL';
 
 type Category = 'all' | 'jam' | 'accident';
 
-type Sort = 'delay' | 'length';
+type Sort = 'road' | 'delay' | 'length';
 
 type TrafficEvent = {
   id: string;
@@ -79,12 +79,22 @@ export default function Home() {
   const [roadType, setRoadType] = useState<RoadType>('ALL');
   const [roadInput, setRoadInput] = useState('');
   const [category, setCategory] = useState<Category>('all');
-  const [sort, setSort] = useState<Sort>('delay');
+  const [sort, setSort] = useState<Sort>('road');
 
   const [events, setEvents] = useState<TrafficEvent[]>([]);
   const [fetchedAt, setFetchedAt] = useState<string>('');
+  const [warning, setWarning] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
+
+  const fetchedAtLabel = useMemo(() => {
+    if (!fetchedAt) return '-';
+    const d = new Date(fetchedAt);
+    if (Number.isNaN(d.getTime())) return fetchedAt;
+    const minsAgo = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+    const local = d.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return `${local} (${minsAgo} min geleden)`;
+  }, [fetchedAt]);
 
   const derivedRoad = useMemo(() => parseRoadInput(roadInput), [roadInput]);
 
@@ -107,11 +117,13 @@ export default function Home() {
     try {
       setLoading(true);
       setError('');
+      setWarning('');
       const res = await fetch(queryUrl, { cache: 'no-store' });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error ?? 'API error');
       setEvents(json.events);
       setFetchedAt(json.fetchedAt);
+      if (json.warning) setWarning(String(json.warning));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Unknown error';
       setError(msg);
@@ -192,6 +204,7 @@ export default function Home() {
             value={sort}
             onChange={(e) => setSort(e.target.value as Sort)}
           >
+            <option value="road">Weg</option>
             <option value="delay">{t.delay}</option>
             <option value="length">{t.length}</option>
           </select>
@@ -200,9 +213,10 @@ export default function Home() {
 
       <section className="mt-4 text-sm text-gray-600 flex gap-3 flex-wrap">
         <div>
-          {t.updated}: <span className="font-mono">{fetchedAt || '-'}</span>
+          {t.updated}: <span className="font-mono">{fetchedAtLabel}</span>
         </div>
         {loading ? <div>…</div> : null}
+        {warning ? <div className="text-amber-700">{warning}</div> : null}
         {error ? <div className="text-red-600">{error}</div> : null}
       </section>
 

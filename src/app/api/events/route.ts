@@ -23,7 +23,7 @@ function parseQuery(url: URL): EventsQuery {
     type: type === 'A' || type === 'N' ? type : undefined,
     road: roadStr ? Number(roadStr) : undefined,
     category: category === 'jam' || category === 'accident' ? category : undefined,
-    sort: sort === 'delay' || sort === 'length' ? sort : undefined,
+    sort: sort === 'delay' || sort === 'length' || sort === 'road' ? sort : undefined,
   };
 }
 
@@ -35,6 +35,18 @@ function applyFilterSort(events: TrafficEvent[], q: EventsQuery): TrafficEvent[]
 
   const sortKey = q.sort ?? 'delay';
   out = [...out].sort((a, b) => {
+    if (sortKey === 'road') {
+      if (a.roadType !== b.roadType) return a.roadType === 'A' ? -1 : 1;
+      if (a.roadNumber !== b.roadNumber) return a.roadNumber - b.roadNumber;
+      // Within a road: show bigger delays first, then longer.
+      const ad = typeof a.delayMin === 'number' ? a.delayMin : -1;
+      const bd = typeof b.delayMin === 'number' ? b.delayMin : -1;
+      if (ad !== bd) return bd - ad;
+      const al = typeof a.lengthKm === 'number' ? a.lengthKm : -1;
+      const bl = typeof b.lengthKm === 'number' ? b.lengthKm : -1;
+      return bl - al;
+    }
+
     const av = sortKey === 'delay' ? a.delayMin : a.lengthKm;
     const bv = sortKey === 'delay' ? b.delayMin : b.lengthKm;
     const an = typeof av === 'number' ? av : -1;

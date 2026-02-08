@@ -23,5 +23,5 @@ export interface EventsQuery {
   type?: RoadType; // A or N
   road?: number; // 8
   category?: EventCategory; // jam or accident
-  sort?: 'delay' | 'length';
+  sort?: 'delay' | 'length' | 'road';
 }
