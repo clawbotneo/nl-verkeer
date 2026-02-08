@@ -15,7 +15,7 @@ export interface TrafficEvent {
   category: EventCategory;
   eventTypeRaw?: string;
   lastUpdated: string; // ISO
-  source: 'NDW';
+  source: 'NDW' | 'ANWB';
   sourceUrl: string;
 }
 

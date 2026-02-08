@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchNdwEvents } from '@/lib/ndw';
+import { fetchAnwbEvents } from '@/lib/anwb';
 import type { EventsQuery, TrafficEvent } from '@/lib/types';
 
 type Cache = {
@@ -78,9 +79,24 @@ async function getEventsFresh(): Promise<{ cache: Cache; stale: boolean; warning
   const cache = globalThis.__nlVerkeerCache;
   if (cache && now - cache.fetchedAt < CACHE_TTL_MS) return { cache, stale: false };
 
+  const preferred = (process.env.NL_VERKEER_SOURCE ?? 'NDW').toUpperCase();
+
+  async function load(): Promise<TrafficEvent[]> {
+    if (preferred === 'ANWB') {
+      // Scrape ANWB (best fidelity) but keep a fallback.
+      try {
+        return await withTimeout(fetchAnwbEvents(), 8000, 'fetchAnwbEvents');
+      } catch {
+        return await withTimeout(fetchNdwEvents(), 8000, 'fetchNdwEvents(fallback)');
+      }
+    }
+
+    // Default: NDW open data.
+    return await withTimeout(fetchNdwEvents(), 8000, 'fetchNdwEvents');
+  }
+
   try {
-    // Hard cap to keep API responsive even if NDW is slow.
-    const events = await withTimeout(fetchNdwEvents(), 8000, 'fetchNdwEvents');
+    const events = await load();
     const next: Cache = { fetchedAt: now, events };
     globalThis.__nlVerkeerCache = next;
     return { cache: next, stale: false };
