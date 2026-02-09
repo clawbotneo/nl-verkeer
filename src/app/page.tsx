@@ -268,10 +268,16 @@ export default function Home() {
             const maxLen = Math.max(-1, ...items.map((i) => (typeof i.lengthKm === 'number' ? i.lengthKm : -1)));
 
             return (
-              <details key={roadCode} className="border rounded bg-white text-gray-900">
+              <details key={roadCode} className="border rounded bg-white text-gray-900 shadow-sm">
                 <summary className="cursor-pointer select-none px-3 py-2 flex items-center justify-between gap-3 bg-gray-100 text-gray-900">
                   <div className="flex items-center gap-3 min-w-0">
-                    <span className="font-mono font-semibold">{roadCode}</span>
+                    <span
+                      className={`font-mono font-semibold px-2 py-0.5 rounded text-white ${
+                        jamCount ? 'bg-red-600' : 'bg-orange-500'
+                      }`}
+                    >
+                      {roadCode}
+                    </span>
                     <span className="text-sm text-gray-600 truncate">
                       {jamCount ? `${jamCount} ${t.jams.toLowerCase()}` : ''}
                       {jamCount && accCount ? ' · ' : ''}
