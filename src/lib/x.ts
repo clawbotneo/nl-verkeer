@@ -27,6 +27,9 @@ declare global {
   // Cache user id lookup.
   // eslint-disable-next-line no-var
   var __nlVerkeerRwsUserId: { fetchedAt: number; id: string } | undefined;
+  // Last X error for debugging.
+  // eslint-disable-next-line no-var
+  var __nlVerkeerXLastError: { at: number; msg: string } | undefined;
 }
 
 const CACHE_TTL_MS = 3 * 60 * 1000;
@@ -100,7 +103,9 @@ async function getRwsUserId(token: string): Promise<string> {
       lastErr = e;
     }
   }
-  throw (lastErr instanceof Error ? lastErr : new Error('Failed to resolve RWSverkeersinfo user id'));
+  const err = lastErr instanceof Error ? lastErr : new Error('Failed to resolve RWSverkeersinfo user id');
+  globalThis.__nlVerkeerXLastError = { at: now, msg: err.message };
+  throw err;
 }
 
 async function getRwsLatestTweets(token: string): Promise<Array<{ id: string; text: string; created_at?: string }>> {
@@ -130,7 +135,9 @@ async function getRwsLatestTweets(token: string): Promise<Array<{ id: string; te
       lastErr = e;
     }
   }
-  throw (lastErr instanceof Error ? lastErr : new Error('Failed to fetch RWSverkeersinfo tweets'));
+  const err = lastErr instanceof Error ? lastErr : new Error('Failed to fetch RWSverkeersinfo tweets');
+  globalThis.__nlVerkeerXLastError = { at: now, msg: err.message };
+  throw err;
 }
 
 export async function fetchRwsExternalInfoForRoad(roadCode: string): Promise<ExternalPost | undefined> {
@@ -161,8 +168,15 @@ export async function fetchRwsExternalInfoForRoad(roadCode: string): Promise<Ext
 
     cache.set(rc, { fetchedAt: now, post });
     return post;
-  } catch {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Unknown X error';
+    globalThis.__nlVerkeerXLastError = { at: now, msg };
     cache.set(rc, { fetchedAt: now, post: undefined });
     return undefined;
   }
 }
+
+export function getXLastError(): { at: number; msg: string } | undefined {
+  return globalThis.__nlVerkeerXLastError;
+}
+

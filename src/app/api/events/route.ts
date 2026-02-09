@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchNdwEvents } from '@/lib/ndw';
 import { fetchAnwbEvents } from '@/lib/anwb';
-import { fetchRwsExternalInfoForRoad } from '@/lib/x';
+import { fetchRwsExternalInfoForRoad, getXLastError } from '@/lib/x';
 import type { EventsQuery, TrafficEvent } from '@/lib/types';
 
 type Cache = {
@@ -136,15 +136,19 @@ async function getEventsFresh(): Promise<{ cache: Cache; stale: boolean; warning
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const q = parseQuery(url);
+  const xdebug = url.searchParams.get('xdebug') === '1';
 
   try {
     const { cache, stale, warning } = await getEventsFresh();
     const filtered = applyFilterSort(cache.events, q);
 
+    const xLast = xdebug ? getXLastError() : undefined;
+
     return NextResponse.json({
       ok: true,
       stale,
       warning,
+      xDebug: xLast,
       fetchedAt: new Date(cache.fetchedAt).toISOString(),
       count: filtered.length,
       events: filtered,
