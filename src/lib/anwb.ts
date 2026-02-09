@@ -134,8 +134,8 @@ export async function fetchAnwbEvents(): Promise<TrafficEvent[]> {
 
     const delayMin =
       typeof rawDelay === 'number'
-        ? // Heuristic: values > 180 are almost certainly seconds, not minutes.
-          rawDelay > 180
+        ? // Heuristic: ANWB delay is typically seconds (e.g. 120s, 960s). Treat >= 60 as seconds.
+          rawDelay >= 60
           ? Math.round(rawDelay / 60)
           : rawDelay
         : undefined;
