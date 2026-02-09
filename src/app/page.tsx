@@ -226,93 +226,94 @@ export default function Home() {
         {error ? <div className="text-red-600">{error}</div> : null}
       </section>
 
-      <section className="mt-6">
-        <div className="overflow-x-auto border rounded">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="text-left p-2">Weg</th>
-                <th className="text-left p-2">{t.category}</th>
-                <th className="text-right p-2">{t.delay}</th>
-                <th className="text-right p-2">{t.length}</th>
-                <th className="text-left p-2">Reden</th>
-                <th className="text-left p-2">Externe info</th>
-                <th className="text-left p-2">Info</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(() => {
-                const groups = new Map<string, TrafficEvent[]>();
-                for (const e of events) {
-                  const k = e.roadCode;
-                  const arr = groups.get(k);
-                  if (arr) arr.push(e);
-                  else groups.set(k, [e]);
-                }
+      <section className="mt-6 space-y-2">
+        {(() => {
+          const groups = new Map<string, TrafficEvent[]>();
+          for (const e of events) {
+            const k = e.roadCode;
+            const arr = groups.get(k);
+            if (arr) arr.push(e);
+            else groups.set(k, [e]);
+          }
 
-                return Array.from(groups.entries()).flatMap(([roadCode, items]) =>
-                  items.map((e, idx) => (
-                    <tr key={e.id} className="border-t">
-                      {idx === 0 ? (
-                        <td className="p-2 font-mono align-top" rowSpan={items.length}>
-                          {roadCode}
-                        </td>
-                      ) : null}
-                      <td className="p-2">{e.category === 'jam' ? t.jams : t.accidents}</td>
-                      <td className="p-2 text-right font-mono">
-                        {typeof e.delayMin === 'number' ? `${e.delayMin} min` : '—'}
-                      </td>
-                      <td className="p-2 text-right font-mono">
-                        {typeof e.lengthKm === 'number' ? `${e.lengthKm} km` : '—'}
-                      </td>
-                      <td className="p-2">
-                        <div>{e.reasonText || '—'}</div>
-                      </td>
-                      <td className="p-2">
-                        {e.externalInfoText ? (
-                          <div className="space-y-1">
-                            <div className="whitespace-pre-wrap break-words">{e.externalInfoText}</div>
-                            {e.externalInfoUrl ? (
-                              <a
-                                className="text-xs text-blue-600 hover:underline"
-                                href={e.externalInfoUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                @RWSverkeersinfo
-                              </a>
-                            ) : null}
+          const entries = Array.from(groups.entries());
+
+          return entries.map(([roadCode, items]) => {
+            const jamCount = items.filter((i) => i.category === 'jam').length;
+            const accCount = items.length - jamCount;
+            const maxDelay = Math.max(-1, ...items.map((i) => (typeof i.delayMin === 'number' ? i.delayMin : -1)));
+            const maxLen = Math.max(-1, ...items.map((i) => (typeof i.lengthKm === 'number' ? i.lengthKm : -1)));
+
+            return (
+              <details key={roadCode} className="border rounded bg-white">
+                <summary className="cursor-pointer select-none px-3 py-2 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="font-mono font-semibold">{roadCode}</span>
+                    <span className="text-sm text-gray-600 truncate">
+                      {jamCount ? `${jamCount} ${t.jams.toLowerCase()}` : ''}
+                      {jamCount && accCount ? ' · ' : ''}
+                      {accCount ? `${accCount} ${t.accidents.toLowerCase()}` : ''}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-700 flex items-center gap-4 shrink-0">
+                    <span className="font-mono">{maxDelay >= 0 ? `${maxDelay} min` : '—'}</span>
+                    <span className="font-mono">{maxLen >= 0 ? `${maxLen.toFixed(1)} km` : '—'}</span>
+                  </div>
+                </summary>
+
+                <div className="border-t px-3 py-2 space-y-3">
+                  {items.map((e) => (
+                    <div key={e.id} className="rounded border bg-gray-50 p-3">
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="min-w-0">
+                          <div className="text-sm text-gray-600">{e.category === 'jam' ? t.jams : t.accidents}</div>
+                          <div className="font-medium break-words">{e.locationText || '—'}</div>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm">
+                          <div className="text-right">
+                            <div className="text-gray-600">{t.delay}</div>
+                            <div className="font-mono">{typeof e.delayMin === 'number' ? `${e.delayMin} min` : '—'}</div>
                           </div>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="p-2">
-                        <div className="line-clamp-2">{e.locationText || '—'}</div>
-                        <a
-                          className="text-xs text-blue-600 hover:underline"
-                          href={e.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
+                          <div className="text-right">
+                            <div className="text-gray-600">{t.length}</div>
+                            <div className="font-mono">{typeof e.lengthKm === 'number' ? `${e.lengthKm} km` : '—'}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {e.reasonText ? (
+                        <div className="mt-2">
+                          <div className="text-xs text-gray-600">Reden</div>
+                          <div className="break-words">{e.reasonText}</div>
+                        </div>
+                      ) : null}
+
+                      {e.externalInfoText ? (
+                        <div className="mt-2">
+                          <div className="text-xs text-gray-600">Externe info</div>
+                          <div className="whitespace-pre-wrap break-words">{e.externalInfoText}</div>
+                          {e.externalInfoUrl ? (
+                            <a className="text-xs text-blue-600 hover:underline" href={e.externalInfoUrl} target="_blank" rel="noreferrer">
+                              @RWSverkeersinfo
+                            </a>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-2">
+                        <a className="text-xs text-blue-600 hover:underline" href={e.sourceUrl} target="_blank" rel="noreferrer">
                           {e.source ?? 'NDW'}
                         </a>
-                      </td>
-                    </tr>
-                  ))
-                );
-              })()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            );
+          });
+        })()}
 
-              {!loading && events.length === 0 ? (
-                <tr>
-                  <td className="p-3 text-gray-600" colSpan={7}>
-                    {t.noResults}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+        {!loading && events.length === 0 ? <div className="text-sm text-gray-600">{t.noResults}</div> : null}
       </section>
 
       <footer className="mt-10 text-xs text-gray-500 space-y-1">
