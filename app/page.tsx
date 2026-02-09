@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 
 type Lang = 'nl' | 'en';
 
@@ -75,6 +75,27 @@ function parseRoadInput(raw: string): { type?: 'A' | 'N'; road?: number } {
   const m = s.match(/^([AN])(\d{1,3})$/);
   if (!m) return {};
   return { type: m[1] as 'A' | 'N', road: Number(m[2]) };
+}
+
+function linkify(text: string): Array<string | React.ReactNode> {
+  // Simple URL linkifier for X text (t.co links etc.).
+  const re = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(re);
+  return parts.map((p, idx) => {
+    if (re.test(p)) {
+      const url = p.replace(/[),.;:!?]+$/g, '');
+      const trail = p.slice(url.length);
+      return (
+        <Fragment key={idx}>
+          <a className="text-blue-600 hover:underline break-all" href={url} target="_blank" rel="noreferrer">
+            {url}
+          </a>
+          {trail}
+        </Fragment>
+      );
+    }
+    return p;
+  });
 }
 
 export default function Home() {
@@ -291,7 +312,7 @@ export default function Home() {
                       {e.externalInfoText ? (
                         <div className="mt-2">
                           <div className="text-xs text-gray-600">Externe info</div>
-                          <div className="whitespace-pre-wrap break-words">{e.externalInfoText}</div>
+                          <div className="whitespace-pre-wrap break-words">{linkify(e.externalInfoText)}</div>
                           {e.externalInfoUrl ? (
                             <a className="text-xs text-blue-600 hover:underline" href={e.externalInfoUrl} target="_blank" rel="noreferrer">
                               @RWSverkeersinfo
