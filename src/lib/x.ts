@@ -32,7 +32,8 @@ declare global {
   var __nlVerkeerXLastError: { at: number; msg: string } | undefined;
 }
 
-const CACHE_TTL_MS = 3 * 60 * 1000;
+// Only refresh X data every 5 minutes (when enabled); keeps costs predictable.
+const CACHE_TTL_MS = 5 * 60 * 1000;
 const USERID_TTL_MS = 24 * 60 * 60 * 1000;
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -156,7 +157,15 @@ export async function fetchRwsExternalInfoForRoad(roadCode: string): Promise<Ext
     const tweets = await getRwsLatestTweets(token);
     const re = roadRegex(rc);
 
-    const hit = tweets.find((t) => re.test(t.text));
+    // Ignore posts older than 1 hour.
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    const hit = tweets.find((t) => {
+      if (!re.test(t.text)) return false;
+      if (!t.created_at) return false;
+      const ts = Date.parse(t.created_at);
+      if (!Number.isFinite(ts)) return false;
+      return ts >= cutoff;
+    });
     const post: ExternalPost | undefined = hit
       ? {
           id: hit.id,
