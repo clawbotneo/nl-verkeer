@@ -146,7 +146,7 @@ export default function Home() {
   }, [queryUrl]);
 
   return (
-    <main className="min-h-screen p-6 max-w-5xl mx-auto">
+    <main className="min-h-screen p-6 max-w-5xl mx-auto bg-gray-50 text-gray-900">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold">{t.title}</h1>
@@ -245,8 +245,8 @@ export default function Home() {
             const maxLen = Math.max(-1, ...items.map((i) => (typeof i.lengthKm === 'number' ? i.lengthKm : -1)));
 
             return (
-              <details key={roadCode} className="border rounded bg-white">
-                <summary className="cursor-pointer select-none px-3 py-2 flex items-center justify-between gap-3">
+              <details key={roadCode} className="border rounded bg-white text-gray-900">
+                <summary className="cursor-pointer select-none px-3 py-2 flex items-center justify-between gap-3 bg-gray-100 text-gray-900">
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="font-mono font-semibold">{roadCode}</span>
                     <span className="text-sm text-gray-600 truncate">
