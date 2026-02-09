@@ -252,12 +252,12 @@ export default function Home() {
                     {typeof e.lengthKm === 'number' ? `${e.lengthKm} km` : '—'}
                   </td>
                   <td className="p-2">
-                    <div className="line-clamp-2">{e.reasonText || '—'}</div>
+                    <div>{e.reasonText || '—'}</div>
                   </td>
                   <td className="p-2">
                     {e.externalInfoText ? (
                       <div className="space-y-1">
-                        <div className="line-clamp-3">{e.externalInfoText}</div>
+                        <div className="whitespace-pre-wrap break-words">{e.externalInfoText}</div>
                         {e.externalInfoUrl ? (
                           <a
                             className="text-xs text-blue-600 hover:underline"
