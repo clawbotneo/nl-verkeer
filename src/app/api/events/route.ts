@@ -100,14 +100,15 @@ async function getEventsFresh(): Promise<{ cache: Cache; stale: boolean; warning
     let events = await load();
 
     // Optional enrichment: add latest matching @RWSverkeersinfo post per roadCode.
-    if (process.env.X_BEARER_TOKEN) {
-      const roadCodes = Array.from(new Set(events.map((e) => e.roadCode)));
-      const posts = await Promise.all(
-        roadCodes.map(async (rc) => ({ rc, post: await fetchRwsExternalInfoForRoad(rc) }))
-      );
+    // Only do X calls when there is at least one *file* (jam) in the current dataset.
+    if (process.env.X_BEARER_TOKEN && events.some((e) => e.category === 'jam')) {
+      const roadCodes = Array.from(new Set(events.filter((e) => e.category === 'jam').map((e) => e.roadCode)));
+      const posts = await Promise.all(roadCodes.map(async (rc) => ({ rc, post: await fetchRwsExternalInfoForRoad(rc) })));
       const byRoad = new Map(posts.filter((p) => p.post).map((p) => [p.rc, p.post!]));
       if (byRoad.size) {
         events = events.map((e) => {
+          // Enrich only jam rows (as requested)
+          if (e.category !== 'jam') return e;
           const p = byRoad.get(e.roadCode);
           if (!p) return e;
           return {
