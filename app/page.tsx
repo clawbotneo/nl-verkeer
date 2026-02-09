@@ -270,7 +270,7 @@ export default function Home() {
                 <summary className="cursor-pointer select-none px-3 py-2 flex items-center justify-between gap-3 bg-gray-100 text-gray-900">
                   <div className="flex items-center gap-3 min-w-0">
                     <span
-                      className={`font-mono font-semibold px-2 py-0.5 rounded text-white ${
+                      className={`font-mono font-semibold px-2 py-0.5 rounded text-white inline-flex items-center justify-center w-[4.5rem] ${
                         jamCount ? 'bg-red-600' : 'bg-orange-500'
                       }`}
                     >
